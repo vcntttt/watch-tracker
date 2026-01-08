@@ -1,0 +1,195 @@
+import { mutation, query } from './_generated/server'
+import { v } from 'convex/values'
+
+const workType = v.union(
+  v.literal('book'),
+  v.literal('movie'),
+  v.literal('series'),
+  v.literal('anime'),
+  v.literal('manga'),
+)
+
+const workStatus = v.union(
+  v.literal('backlog'),
+  v.literal('in-progress'),
+  v.literal('finished'),
+  v.literal('dropped'),
+)
+
+export const list = query({
+  args: {
+    status: v.optional(workStatus),
+    type: v.optional(workType),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const limit = args.limit ?? 200
+
+    if (args.status) {
+      return await ctx.db
+        .query('works')
+        .withIndex('by_status_updatedAt', (q) => q.eq('status', args.status!))
+        .order('desc')
+        .take(limit)
+    }
+
+    if (args.type) {
+      return await ctx.db
+        .query('works')
+        .withIndex('by_type_updatedAt', (q) => q.eq('type', args.type!))
+        .order('desc')
+        .take(limit)
+    }
+
+    return await ctx.db
+      .query('works')
+      .withIndex('by_updatedAt')
+      .order('desc')
+      .take(limit)
+  },
+})
+
+export const get = query({
+  args: { id: v.id('works') },
+  handler: async (ctx, args) => {
+    return await ctx.db.get(args.id)
+  },
+})
+
+export const create = mutation({
+  args: {
+    title: v.string(),
+    type: workType,
+    status: workStatus,
+    rating: v.optional(v.number()),
+    review: v.optional(v.string()),
+    tags: v.optional(v.array(v.string())),
+    notes: v.optional(v.string()),
+    coverUrl: v.optional(v.string()),
+    creator: v.optional(v.string()),
+    year: v.optional(v.number()),
+    progress: v.optional(
+      v.object({
+        current: v.number(),
+        total: v.number(),
+      }),
+    ),
+    startedAt: v.optional(v.number()),
+    finishedAt: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now()
+
+    if (args.progress) {
+      if (args.progress.total <= 0 || args.progress.current < 0) {
+        throw new Error('Invalid progress')
+      }
+      if (args.progress.current > args.progress.total) {
+        throw new Error('Progress current cannot exceed total')
+      }
+    }
+
+    if (args.rating !== undefined && (args.rating < 1 || args.rating > 5)) {
+      throw new Error('Rating must be between 1 and 5')
+    }
+
+    return await ctx.db.insert('works', {
+      title: args.title.trim(),
+      type: args.type,
+      status: args.status,
+      rating: args.rating,
+      review: args.review?.trim() || undefined,
+      tags:
+        args.tags
+          ?.map((t) => t.trim().toLowerCase())
+          .filter(Boolean)
+          .slice(0, 20) ?? [],
+      notes: args.notes?.trim() || undefined,
+      coverUrl: args.coverUrl?.trim() || undefined,
+      creator: args.creator?.trim() || undefined,
+      year: args.year,
+      progress: args.progress,
+      startedAt: args.startedAt,
+      finishedAt: args.finishedAt,
+      createdAt: now,
+      updatedAt: now,
+    })
+  },
+})
+
+export const update = mutation({
+  args: {
+    id: v.id('works'),
+    patch: v.object({
+      title: v.optional(v.string()),
+      type: v.optional(workType),
+      status: v.optional(workStatus),
+      rating: v.optional(v.number()),
+      review: v.optional(v.string()),
+      tags: v.optional(v.array(v.string())),
+      notes: v.optional(v.string()),
+      coverUrl: v.optional(v.string()),
+      creator: v.optional(v.string()),
+      year: v.optional(v.number()),
+      progress: v.optional(
+        v.object({
+          current: v.number(),
+          total: v.number(),
+        }),
+      ),
+      startedAt: v.optional(v.number()),
+      finishedAt: v.optional(v.number()),
+    }),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db.get(args.id)
+    if (!existing) {
+      throw new Error('Work not found')
+    }
+
+    const patch: Record<string, any> = { ...args.patch }
+
+    if (patch.title !== undefined) patch.title = patch.title.trim()
+    if (patch.review !== undefined)
+      patch.review = patch.review?.trim() || undefined
+    if (patch.notes !== undefined) patch.notes = patch.notes?.trim() || undefined
+    if (patch.coverUrl !== undefined)
+      patch.coverUrl = patch.coverUrl?.trim() || undefined
+    if (patch.creator !== undefined)
+      patch.creator = patch.creator?.trim() || undefined
+    if (patch.tags !== undefined) {
+      patch.tags = patch.tags
+        .map((t: string) => t.trim().toLowerCase())
+        .filter(Boolean)
+        .slice(0, 20)
+    }
+
+    if (patch.progress !== undefined && patch.progress !== null) {
+      if (patch.progress.total <= 0 || patch.progress.current < 0) {
+        throw new Error('Invalid progress')
+      }
+      if (patch.progress.current > patch.progress.total) {
+        throw new Error('Progress current cannot exceed total')
+      }
+    }
+
+    if (
+      patch.rating !== undefined &&
+      (patch.rating < 1 || patch.rating > 5)
+    ) {
+      throw new Error('Rating must be between 1 and 5')
+    }
+
+    patch.updatedAt = Date.now()
+
+    return await ctx.db.patch(args.id, patch)
+  },
+})
+
+export const remove = mutation({
+  args: { id: v.id('works') },
+  handler: async (ctx, args) => {
+    return await ctx.db.delete(args.id)
+  },
+})
+
